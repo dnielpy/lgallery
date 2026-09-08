@@ -1,0 +1,8 @@
+.git
+.next
+node_modules
+.lgallery-cache
+.env
+coverage
+npm-debug.log*
+pnpm-debug.log*

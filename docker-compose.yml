@@ -1,0 +1,15 @@
+services:
+  lgallery:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      MEDIA_LIBRARY_PATH: /media/library
+      MEDIA_CACHE_PATH: /app/data/cache
+    volumes:
+      - ${MEDIA_LIBRARY_HOST_PATH:?Set MEDIA_LIBRARY_HOST_PATH in .env}:/media/library:ro
+      - lgallery-cache:/app/data/cache
+    restart: unless-stopped
+
+volumes:
+  lgallery-cache:
