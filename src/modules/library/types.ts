@@ -18,3 +18,12 @@ export type MediaPage = {
   items: MediaItem[];
   nextCursor: string | null;
 };
+
+export type AlbumSummary = {
+  id: string;
+  name: string;
+  itemCount: number;
+  cover: MediaItem | null;
+};
+
+export type Album = Pick<AlbumSummary, "id" | "name">;

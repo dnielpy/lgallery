@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { clearLibraryCaches, createMediaId, listMedia, scanLibrary } from "@/src/modules/library/server/library";
+import { clearLibraryCaches, createAlbumId, createMediaId, getAlbumById, listAlbums, listMedia, scanLibrary } from "@/src/modules/library/server/library";
 
 let temporaryRoot: string | undefined;
 
@@ -64,5 +64,31 @@ describe("media library", () => {
     expect(createMediaId("holiday/photo.jpg")).toBe(createMediaId("holiday/photo.jpg"));
     expect(createMediaId("holiday/photo.jpg")).not.toBe(createMediaId("other/photo.jpg"));
     expect(createMediaId("holiday/photo.jpg")).toMatch(/^[a-f0-9]{32}$/);
+  });
+
+  it("treats direct subfolders as albums and scopes their media", async () => {
+    const root = await makeLibrary();
+    await mkdir(path.join(root, "Beach", "nested"), { recursive: true });
+    await mkdir(path.join(root, "Empty"));
+    await mkdir(path.join(root, ".hidden"));
+    await writeFile(path.join(root, "Beach", "cover.jpg"), "image");
+    await writeFile(path.join(root, "Beach", "nested", "clip.mp4"), "video");
+    await writeFile(path.join(root, ".hidden", "secret.jpg"), "ignore");
+    await symlink(path.join(root, "Beach"), path.join(root, "Linked album"));
+
+    const albums = await listAlbums();
+    expect(albums.map((album) => ({ name: album.name, count: album.itemCount }))).toEqual([
+      { name: "Beach", count: 2 },
+      { name: "Empty", count: 0 },
+    ]);
+    expect(albums[0].id).toBe(createAlbumId("Beach"));
+    expect(albums[0].cover?.fileName).toBeTruthy();
+    expect(JSON.stringify(albums)).not.toContain(root);
+
+    const album = await getAlbumById(albums[0].id);
+    expect(album).toEqual({ id: albums[0].id, name: "Beach" });
+    const page = await listMedia({ albumId: albums[0].id });
+    expect(page.items.map((item) => item.fileName).sort()).toEqual(["clip.mp4", "cover.jpg"]);
+    await expect(listMedia({ albumId: "missing" })).rejects.toThrow("Album not found");
   });
 });

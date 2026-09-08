@@ -1,6 +1,7 @@
 "use client";
 
-import { Images, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Images, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { groupMediaByDate } from "@/src/modules/gallery/date-groups";
 import { MediaGroup } from "@/src/modules/gallery/components/media-group";
@@ -11,9 +12,11 @@ type GalleryViewProps = {
   initialItems: MediaItem[];
   initialCursor: string | null;
   error?: string;
+  albumId?: string;
+  title?: string;
 };
 
-export function GalleryView({ initialItems, initialCursor, error }: GalleryViewProps) {
+export function GalleryView({ initialItems, initialCursor, error, albumId, title = "Photos" }: GalleryViewProps) {
   const [items, setItems] = useState(initialItems);
   const [nextCursor, setNextCursor] = useState(initialCursor);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -43,6 +46,7 @@ export function GalleryView({ initialItems, initialCursor, error }: GalleryViewP
     setLoadError(null);
     try {
       const params = new URLSearchParams({ cursor: nextCursor, limit: "60" });
+      if (albumId) params.set("albumId", albumId);
       const response = await fetch(`/api/media?${params}`);
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { error?: string } | null;
@@ -57,7 +61,7 @@ export function GalleryView({ initialItems, initialCursor, error }: GalleryViewP
       loadingRef.current = false;
       setIsLoading(false);
     }
-  }, [nextCursor]);
+  }, [albumId, nextCursor]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -80,16 +84,20 @@ export function GalleryView({ initialItems, initialCursor, error }: GalleryViewP
     if (index >= items.length - 5 && nextCursor) void loadMore();
   }, [items, loadMore, nextCursor]);
 
-  if (error) return <GalleryMessage title="Photo library unavailable" message={error} retry />;
-  if (items.length === 0) return <GalleryMessage title="No photos or videos yet" message="Add supported media to MEDIA_LIBRARY_PATH, then refresh this page." />;
+  if (error) return <GalleryMessage title={albumId ? "Album unavailable" : "Photo library unavailable"} message={error} retry />;
+  if (items.length === 0) return <GalleryMessage title={albumId ? "This album is empty" : "No photos or videos yet"} message={albumId ? "Upload supported photos or videos to this folder, then refresh the page." : "Add supported media to MEDIA_LIBRARY_PATH, then refresh this page."} />;
 
   return (
     <>
       <div ref={containerRef} className="mx-auto max-w-[1800px]">
-        <div className="mb-7 flex items-end justify-between px-1">
+        <div className="mb-7 flex items-end justify-between gap-4 px-1">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-blue">Library</p>
-            <h1 className="mt-1 text-[28px] font-medium tracking-[-0.04em] text-foreground sm:text-[32px]">Photos</h1>
+            {albumId ? (
+              <Link href="/albums" className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-primary-blue hover:underline"><ArrowLeft className="size-3.5" /> Albums</Link>
+            ) : (
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-blue">Library</p>
+            )}
+            <h1 className="mt-1 text-[28px] font-medium tracking-[-0.04em] text-foreground sm:text-[32px]">{title}</h1>
           </div>
           <span className="text-sm text-muted-foreground">{items.length}{nextCursor ? "+" : ""} items</span>
         </div>

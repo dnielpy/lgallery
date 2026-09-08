@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import type { MediaItem, MediaKind, MediaPage } from "@/src/modules/library/types";
+import type { Album, AlbumSummary, MediaItem, MediaKind, MediaPage } from "@/src/modules/library/types";
 
 const PAGE_SIZE = 60;
 const SNAPSHOT_TTL_MS = 10 * 60 * 1000;
@@ -40,6 +40,7 @@ type LibrarySnapshot = {
   id: string;
   createdAt: number;
   files: MediaFile[];
+  albumId: string | null;
 };
 
 type CursorPayload = {
@@ -50,12 +51,15 @@ type CursorPayload = {
 type ListMediaOptions = {
   cursor?: string;
   limit?: number;
+  albumId?: string;
 };
+
+type AlbumDirectory = Album & { absolutePath: string };
 
 const snapshots = new Map<string, LibrarySnapshot>();
 const metadataCache = new Map<string, MediaMetadata & { size: number; modifiedAtMs: number }>();
 
-function getLibraryRoot() {
+export function getLibraryRoot() {
   const configuredPath = process.env.MEDIA_LIBRARY_PATH?.trim();
   if (!configuredPath) throw new Error("MEDIA_LIBRARY_PATH is not configured.");
   return path.resolve(configuredPath);
@@ -67,6 +71,10 @@ export function getMediaCacheRoot() {
 
 export function createMediaId(relativePath: string) {
   return createHash("sha256").update(relativePath).digest("hex").slice(0, 32);
+}
+
+export function createAlbumId(relativePath: string) {
+  return createHash("sha256").update(`album:${relativePath}`).digest("hex").slice(0, 32);
 }
 
 function encodeCursor(payload: CursorPayload) {
@@ -135,7 +143,7 @@ async function walkDirectory(root: string, directory: string, files: MediaFile[]
   }
 }
 
-export async function scanLibrary() {
+async function validateLibraryRoot() {
   const root = getLibraryRoot();
   try {
     const rootStats = await stat(root);
@@ -146,21 +154,56 @@ export async function scanLibrary() {
     }
     throw new Error("The configured media library directory is unavailable.");
   }
+  return root;
+}
+
+async function getAlbumDirectories(): Promise<AlbumDirectory[]> {
+  const root = await validateLibraryRoot();
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    throw new Error("The configured media library directory is unavailable.");
+  }
+  return entries
+    .filter((entry) => !entry.name.startsWith(".") && entry.isDirectory())
+    .map((entry) => ({
+      id: createAlbumId(entry.name),
+      name: entry.name,
+      absolutePath: path.join(root, entry.name),
+    }))
+    .sort((first, second) => first.name.localeCompare(second.name, "en", { sensitivity: "base" }) || first.name.localeCompare(second.name));
+}
+
+export async function getAlbumById(albumId: string): Promise<Album | null> {
+  const album = (await getAlbumDirectories()).find((candidate) => candidate.id === albumId);
+  return album ? { id: album.id, name: album.name } : null;
+}
+
+export async function scanLibrary(albumId?: string) {
+  const root = await validateLibraryRoot();
+  let scanRoot = root;
+  if (albumId) {
+    const album = (await getAlbumDirectories()).find((candidate) => candidate.id === albumId);
+    if (!album) throw new Error("Album not found.");
+    scanRoot = album.absolutePath;
+  }
 
   const files: MediaFile[] = [];
-  await walkDirectory(root, root, files);
+  await walkDirectory(root, scanRoot, files);
   return files.sort((first, second) => {
     if (second.modifiedAtMs !== first.modifiedAtMs) return second.modifiedAtMs - first.modifiedAtMs;
     return first.relativePath.localeCompare(second.relativePath);
   });
 }
 
-async function createSnapshot() {
+async function createSnapshot(albumId?: string) {
   cleanupSnapshots();
   const snapshot: LibrarySnapshot = {
     id: randomUUID(),
     createdAt: Date.now(),
-    files: await scanLibrary(),
+    files: await scanLibrary(albumId),
+    albumId: albumId ?? null,
   };
   snapshots.set(snapshot.id, snapshot);
   return snapshot;
@@ -253,14 +296,14 @@ async function serializeMedia(file: MediaFile): Promise<MediaItem> {
   };
 }
 
-export async function listMedia({ cursor, limit = PAGE_SIZE }: ListMediaOptions = {}): Promise<MediaPage> {
+export async function listMedia({ cursor, limit = PAGE_SIZE, albumId }: ListMediaOptions = {}): Promise<MediaPage> {
   cleanupSnapshots();
   const safeLimit = Math.min(Math.max(Math.floor(limit) || PAGE_SIZE, 1), PAGE_SIZE);
   const decoded = cursor ? decodeCursor(cursor) : null;
   let snapshot = decoded ? snapshots.get(decoded.snapshotId) : undefined;
   let offset = decoded?.offset ?? 0;
-  if (!snapshot) {
-    snapshot = await createSnapshot();
+  if (!snapshot || (albumId !== undefined && snapshot.albumId !== albumId)) {
+    snapshot = await createSnapshot(albumId);
     offset = 0;
   }
 
@@ -273,6 +316,25 @@ export async function listMedia({ cursor, limit = PAGE_SIZE }: ListMediaOptions 
       ? encodeCursor({ snapshotId: snapshot.id, offset: nextOffset })
       : null,
   };
+}
+
+export async function listAlbums(): Promise<AlbumSummary[]> {
+  const root = await validateLibraryRoot();
+  const albums = await getAlbumDirectories();
+  return mapWithConcurrency(albums, METADATA_CONCURRENCY, async (album) => {
+    const files: MediaFile[] = [];
+    await walkDirectory(root, album.absolutePath, files);
+    files.sort((first, second) => {
+      if (second.modifiedAtMs !== first.modifiedAtMs) return second.modifiedAtMs - first.modifiedAtMs;
+      return first.relativePath.localeCompare(second.relativePath);
+    });
+    return {
+      id: album.id,
+      name: album.name,
+      itemCount: files.length,
+      cover: files[0] ? await serializeMedia(files[0]) : null,
+    };
+  });
 }
 
 export async function getMediaFileById(mediaId: string) {

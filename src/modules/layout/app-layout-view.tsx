@@ -12,7 +12,7 @@ export function AppLayoutView({ children }: { children: ReactNode }) {
         <AppBar />
         <div className="flex min-h-[calc(100vh-64px)]">
           <Sidebar />
-          <main className="min-w-0 flex-1 px-2 pb-10 pt-5 sm:px-4 lg:px-6 lg:pt-7">
+          <main className="min-w-0 flex-1 px-2 pb-28 pt-5 sm:px-4 lg:px-6 lg:pb-10 lg:pt-7">
             {children}
           </main>
         </div>
