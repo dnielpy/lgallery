@@ -2,7 +2,7 @@ services:
   lgallery:
     build: .
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       MEDIA_LIBRARY_PATH: /media/library
       MEDIA_CACHE_PATH: /app/data/cache
