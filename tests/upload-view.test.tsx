@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUploadQueueId, UploadView } from "@/src/modules/upload/upload-view";
 
 type Listener = (event: ProgressEvent<EventTarget>) => void;
@@ -44,10 +44,18 @@ const NativeXMLHttpRequest = globalThis.XMLHttpRequest;
 beforeEach(() => {
   MockXMLHttpRequest.instances = [];
   globalThis.XMLHttpRequest = MockXMLHttpRequest as unknown as typeof XMLHttpRequest;
+  vi.stubGlobal("fetch", vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ albums: [
+      { id: "family", name: "Family" },
+      { id: "travel", name: "Travel" },
+    ] }),
+  })));
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   globalThis.XMLHttpRequest = NativeXMLHttpRequest;
 });
 
@@ -81,5 +89,20 @@ describe("UploadView", () => {
     request.responseText = JSON.stringify({ fileName: "holiday.jpg", folderName: "Summer", size: 10 });
     act(() => request.emit("load"));
     await waitFor(() => expect(screen.getByText(/Uploaded ·/)).toBeInTheDocument());
+  });
+
+  it("uploads into a selected existing album", async () => {
+    render(<UploadView />);
+    const file = new File(["photo"], "portrait.jpg", { type: "image/jpeg" });
+    fireEvent.change(screen.getByLabelText("Choose files to upload"), { target: { files: [file] } });
+
+    const existingAlbum = await screen.findByRole("button", { name: /Existing album/ });
+    await waitFor(() => expect(existingAlbum).toBeEnabled());
+    fireEvent.click(existingAlbum);
+    fireEvent.change(screen.getByLabelText("Album"), { target: { value: "travel" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start upload" }));
+
+    await waitFor(() => expect(MockXMLHttpRequest.instances).toHaveLength(1));
+    expect(MockXMLHttpRequest.instances[0].headers.get("X-Folder-Name")).toBe("Travel");
   });
 });

@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { clearLibraryCaches, createAlbumId, createMediaId, getAlbumById, listAlbums, listMedia, scanLibrary } from "@/src/modules/library/server/library";
+import { clearLibraryCaches, createAlbumId, createMediaId, getAlbumById, listAlbumDestinations, listAlbums, listMedia, scanLibrary } from "@/src/modules/library/server/library";
 
 let temporaryRoot: string | undefined;
 
@@ -84,6 +84,10 @@ describe("media library", () => {
     expect(albums[0].id).toBe(createAlbumId("Beach"));
     expect(albums[0].cover?.fileName).toBeTruthy();
     expect(JSON.stringify(albums)).not.toContain(root);
+    await expect(listAlbumDestinations()).resolves.toEqual([
+      { id: createAlbumId("Beach"), name: "Beach" },
+      { id: createAlbumId("Empty"), name: "Empty" },
+    ]);
 
     const album = await getAlbumById(albums[0].id);
     expect(album).toEqual({ id: albums[0].id, name: "Beach" });

@@ -180,6 +180,10 @@ export async function getAlbumById(albumId: string): Promise<Album | null> {
   return album ? { id: album.id, name: album.name } : null;
 }
 
+export async function listAlbumDestinations(): Promise<Album[]> {
+  return (await getAlbumDirectories()).map(({ id, name }) => ({ id, name }));
+}
+
 export async function scanLibrary(albumId?: string) {
   const root = await validateLibraryRoot();
   let scanRoot = root;

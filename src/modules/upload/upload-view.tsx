@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { DestinationDialog } from "@/src/modules/upload/components/destination-dialog";
+import { DestinationDialog, type UploadDestination } from "@/src/modules/upload/components/destination-dialog";
 import { UploadDropzone } from "@/src/modules/upload/components/upload-dropzone";
 import { formatBytes, UploadList } from "@/src/modules/upload/components/upload-list";
 import type { UploadQueueItem, UploadResponse, UploadResult } from "@/src/modules/upload/types";
+import type { Album } from "@/src/modules/library/types";
 
 const UPLOAD_CONCURRENCY = 3;
 
@@ -19,8 +20,12 @@ export function createUploadQueueId() {
 
 export function UploadView() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [destination, setDestination] = useState<"root" | "folder">("root");
+  const [destination, setDestination] = useState<UploadDestination>("root");
   const [folderName, setFolderName] = useState("");
+  const [albums, setAlbums] = useState<Album[]>([]);
+  const [albumsLoading, setAlbumsLoading] = useState(false);
+  const [albumsError, setAlbumsError] = useState<string | null>(null);
+  const [selectedAlbumId, setSelectedAlbumId] = useState("");
   const [uploads, setUploads] = useState<UploadQueueItem[]>([]);
   const requests = useRef(new Map<string, XMLHttpRequest>());
 
@@ -28,11 +33,31 @@ export function UploadView() {
     for (const request of requests.current.values()) request.abort();
   }, []);
 
+  const loadAlbums = async () => {
+    setAlbumsLoading(true);
+    setAlbumsError(null);
+    try {
+      const response = await fetch("/api/albums", { cache: "no-store" });
+      const body = await response.json() as { albums?: Album[]; error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Unable to load albums.");
+      const nextAlbums = body.albums ?? [];
+      setAlbums(nextAlbums);
+      setSelectedAlbumId((current) => nextAlbums.some((album) => album.id === current) ? current : nextAlbums[0]?.id ?? "");
+    } catch (error) {
+      setAlbums([]);
+      setSelectedAlbumId("");
+      setAlbumsError(error instanceof Error ? error.message : "Unable to load albums.");
+    } finally {
+      setAlbumsLoading(false);
+    }
+  };
+
   const chooseFiles = (files: File[]) => {
     if (files.length === 0) return;
     setDestination("root");
     setFolderName("");
     setPendingFiles(files);
+    void loadAlbums();
   };
 
   const updateUpload = (id: string, patch: Partial<UploadQueueItem>) => {
@@ -75,7 +100,11 @@ export function UploadView() {
 
   const startUploads = () => {
     const files = pendingFiles;
-    const selectedFolder = destination === "folder" ? folderName.trim() : null;
+    const selectedFolder = destination === "folder"
+      ? folderName.trim()
+      : destination === "album"
+        ? albums.find((album) => album.id === selectedAlbumId)?.name ?? null
+        : null;
     const queued = files.map<UploadQueueItem>((file) => ({
       id: createUploadQueueId(),
       file,
@@ -119,8 +148,13 @@ export function UploadView() {
         totalSize={formatBytes(pendingSize)}
         destination={destination}
         folderName={folderName}
+        albums={albums}
+        albumsLoading={albumsLoading}
+        albumsError={albumsError}
+        selectedAlbumId={selectedAlbumId}
         onDestinationChange={setDestination}
         onFolderNameChange={setFolderName}
+        onSelectedAlbumChange={setSelectedAlbumId}
         onCancel={() => setPendingFiles([])}
         onConfirm={startUploads}
       />
