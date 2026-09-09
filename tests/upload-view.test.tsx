@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { UploadView } from "@/src/modules/upload/upload-view";
+import { createUploadQueueId, UploadView } from "@/src/modules/upload/upload-view";
 
 type Listener = (event: ProgressEvent<EventTarget>) => void;
 
@@ -52,6 +52,13 @@ afterEach(() => {
 });
 
 describe("UploadView", () => {
+  it("creates queue IDs when randomUUID is unavailable on an insecure LAN origin", () => {
+    const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: {} });
+    expect(createUploadQueueId()).toMatch(/^upload-[a-z0-9]+-[a-z0-9]+$/);
+    if (cryptoDescriptor) Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
+  });
+
   it("asks for a destination and reports per-file progress", async () => {
     render(<UploadView />);
     const file = new File(["abcdefghij"], "holiday.jpg", { type: "image/jpeg" });

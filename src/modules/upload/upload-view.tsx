@@ -10,6 +10,13 @@ import type { UploadQueueItem, UploadResponse, UploadResult } from "@/src/module
 
 const UPLOAD_CONCURRENCY = 3;
 
+export function createUploadQueueId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function UploadView() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [destination, setDestination] = useState<"root" | "folder">("root");
@@ -70,7 +77,7 @@ export function UploadView() {
     const files = pendingFiles;
     const selectedFolder = destination === "folder" ? folderName.trim() : null;
     const queued = files.map<UploadQueueItem>((file) => ({
-      id: globalThis.crypto.randomUUID(),
+      id: createUploadQueueId(),
       file,
       progress: 0,
       status: "queued",
