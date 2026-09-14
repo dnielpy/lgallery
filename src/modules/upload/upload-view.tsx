@@ -37,7 +37,7 @@ export function UploadView() {
     setAlbumsLoading(true);
     setAlbumsError(null);
     try {
-      const response = await fetch("/api/albums", { cache: "no-store" });
+      const response = await fetch("/lgallery/api/albums", { cache: "no-store" });
       const body = await response.json() as { albums?: Album[]; error?: string };
       if (!response.ok) throw new Error(body.error ?? "Unable to load albums.");
       const nextAlbums = body.albums ?? [];
@@ -68,7 +68,7 @@ export function UploadView() {
     const request = new XMLHttpRequest();
     requests.current.set(item.id, request);
     updateUpload(item.id, { status: "uploading" });
-    request.open("POST", "/api/upload");
+    request.open("POST", "/lgallery/api/upload");
     request.setRequestHeader("X-File-Name", encodeURIComponent(item.file.name));
     if (selectedFolder) request.setRequestHeader("X-Folder-Name", encodeURIComponent(selectedFolder));
     request.upload.addEventListener("progress", (event) => {

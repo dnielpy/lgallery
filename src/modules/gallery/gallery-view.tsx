@@ -47,7 +47,7 @@ export function GalleryView({ initialItems, initialCursor, error, albumId, title
     try {
       const params = new URLSearchParams({ cursor: nextCursor, limit: "60" });
       if (albumId) params.set("albumId", albumId);
-      const response = await fetch(`/api/media?${params}`);
+      const response = await fetch(`/lgallery/api/media?${params}`);
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { error?: string } | null;
         throw new Error(body?.error ?? "Unable to load more photos.");

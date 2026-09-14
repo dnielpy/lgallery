@@ -1,5 +1,7 @@
 # LGallery
 
+> This application is supported as a Home Server submodule and expects the central gateway identity and shared workspace packages.
+
 LGallery is a private photo and video gallery for your home network. It scans one folder recursively and presents the media as a date-grouped, Google Photos-inspired timeline with an immersive viewer and local uploads.
 
 ## Features
