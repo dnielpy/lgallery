@@ -32,7 +32,8 @@ export function MediaViewer({ items, index, onClose, onNavigate }: MediaViewerPr
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      // In full screen Escape only leaves it.
+      if (event.key === "Escape") { if (!document.fullscreenElement) { event.preventDefault(); onClose(); } return; }
       if (event.target instanceof HTMLInputElement) return;
       if (event.key === "ArrowLeft" && index > 0) { event.preventDefault(); onNavigate(index - 1); }
       if (event.key === "ArrowRight" && index < items.length - 1) { event.preventDefault(); onNavigate(index + 1); }
@@ -56,7 +57,9 @@ export function MediaViewer({ items, index, onClose, onNavigate }: MediaViewerPr
   const canGoNext = index < items.length - 1;
 
   const onTouchStart = (event: TouchEvent) => {
-    if (event.touches.length === 1) touchStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+    // Dragging the video's seek bar or volume, or anything in full screen, is not a swipe to the next item.
+    const onControls = event.target instanceof Element && event.target.closest("[data-player-controls]");
+    if (event.touches.length === 1 && !onControls && !document.fullscreenElement) touchStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
     else touchStart.current = null;
   };
   const onTouchEnd = (event: TouchEvent) => {

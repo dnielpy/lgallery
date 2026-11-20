@@ -9,7 +9,7 @@ LGallery is a private photo and video gallery for your home network. It scans on
 - Responsive justified rows and infinite loading.
 - On-demand previews stored in a persistent cache.
 - Photo zoom, pan, wheel, double-click, and touch gestures.
-- Custom range-aware video player with seeking, volume, keyboard shortcuts, and full screen.
+- The same video player as LocalTube: drag-to-seek bar, playback speed, double-tap seeking, keyboard shortcuts, and full screen on phones too.
 - Light and dark gallery themes.
 - Drag-and-drop uploads with per-file progress, duplicate-safe names, and a root or new-subfolder destination.
 - Album browsing based on direct subfolders, with the normal gallery and viewer inside each album.
@@ -72,9 +72,13 @@ The library is rescanned on a fresh page load. Refresh the browser after adding,
 
 - `Escape`: close the viewer.
 - `Left` / `Right`: previous or next library item.
-- `Space`: play or pause video.
-- `J` / `L`: seek video backward or forward five seconds.
-- `M`: mute or unmute video.
+- `Space` / `K`: play or pause video.
+- `J` / `L`: seek video backward or forward ten seconds; on a touch screen, double tap the left or right side.
+- `Up` / `Down`: change the volume; `M`: mute or unmute.
+- `F` or double click: full screen. On an iPhone the video opens in the system's full-screen player.
+- `0`–`9`: jump to that tenth of the video; `Home` / `End`: start or end.
+- `Shift` + `<` / `>`: playback speed, also in the player's settings.
+- On a touch screen, tap the video to show or hide its controls.
 - Photos support wheel/pinch zoom, drag-to-pan, and double-click to toggle zoom.
 
 ## Validation
