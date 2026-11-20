@@ -55,7 +55,7 @@ export async function GET(_request: Request, context: ThumbnailContext) {
   const media = await getMediaFileById(mediaId);
   if (!media) return new Response("Media not found", { status: 404 });
 
-  const cachePath = await getThumbnailCachePath(media);
+  const cachePath = getThumbnailCachePath(media);
   const contentType = media.kind === "image" ? "image/webp" : "image/jpeg";
   try {
     const cached = await readFile(cachePath);
@@ -66,7 +66,7 @@ export async function GET(_request: Request, context: ThumbnailContext) {
     // Generate below.
   }
 
-  await mkdir(await getMediaCacheRoot(), { recursive: true });
+  await mkdir(getMediaCacheRoot(), { recursive: true });
   const extension = media.kind === "image" ? "webp" : "jpg";
   const temporaryPath = `${cachePath}.${randomUUID()}.tmp.${extension}`;
 

@@ -3,8 +3,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { parseHomeServerIdentity } from "@home-server/contracts";
-import { headers } from "next/headers";
 import type { Album, AlbumSummary, MediaItem, MediaKind, MediaPage } from "@/src/modules/library/types";
 
 const PAGE_SIZE = 60;
@@ -43,7 +41,6 @@ type LibrarySnapshot = {
   createdAt: number;
   files: MediaFile[];
   albumId: string | null;
-  root: string;
 };
 
 type CursorPayload = {
@@ -62,21 +59,14 @@ type AlbumDirectory = Album & { absolutePath: string };
 const snapshots = new Map<string, LibrarySnapshot>();
 const metadataCache = new Map<string, MediaMetadata & { size: number; modifiedAtMs: number }>();
 
-export async function getLibraryRoot() {
+export function getLibraryRoot() {
   const configuredPath = process.env.MEDIA_LIBRARY_PATH?.trim();
-  if (configuredPath) return path.resolve(configuredPath);
-  let identity = null;
-  try {
-    identity = parseHomeServerIdentity(await headers());
-  } catch {
-    // Server utilities can also run without a request in tests and maintenance jobs.
-  }
-  if (identity) return path.join(path.resolve(process.env.HOME_SERVER_DATA_PATH?.trim() || "/data"), identity.workspaceFolder, "lgallery");
-  throw new Error("MEDIA_LIBRARY_PATH is not configured.");
+  if (!configuredPath) throw new Error("MEDIA_LIBRARY_PATH is not configured.");
+  return path.resolve(configuredPath);
 }
 
-export async function getMediaCacheRoot() {
-  return path.join(await getLibraryRoot(), ".cache");
+export function getMediaCacheRoot() {
+  return path.resolve(/* turbopackIgnore: true */ process.env.MEDIA_CACHE_PATH?.trim() || ".lgallery-cache");
 }
 
 export function createMediaId(relativePath: string) {
@@ -154,7 +144,7 @@ async function walkDirectory(root: string, directory: string, files: MediaFile[]
 }
 
 async function validateLibraryRoot() {
-  const root = await getLibraryRoot();
+  const root = getLibraryRoot();
   try {
     const rootStats = await stat(root);
     if (!rootStats.isDirectory()) throw new Error("MEDIA_LIBRARY_PATH must point to a directory.");
@@ -213,13 +203,11 @@ export async function scanLibrary(albumId?: string) {
 
 async function createSnapshot(albumId?: string) {
   cleanupSnapshots();
-  const root = await getLibraryRoot();
   const snapshot: LibrarySnapshot = {
     id: randomUUID(),
     createdAt: Date.now(),
     files: await scanLibrary(albumId),
     albumId: albumId ?? null,
-    root,
   };
   snapshots.set(snapshot.id, snapshot);
   return snapshot;
@@ -236,7 +224,7 @@ function runCommand(command: string, args: string[]) {
 }
 
 async function readMetadata(file: MediaFile): Promise<MediaMetadata> {
-  const cached = metadataCache.get(file.absolutePath);
+  const cached = metadataCache.get(file.id);
   if (cached && cached.size === file.size && cached.modifiedAtMs === file.modifiedAtMs) return cached;
 
   let metadata: MediaMetadata = { width: 1, height: 1, durationSeconds: null };
@@ -277,7 +265,7 @@ async function readMetadata(file: MediaFile): Promise<MediaMetadata> {
     }
   }
 
-  metadataCache.set(file.absolutePath, { ...metadata, size: file.size, modifiedAtMs: file.modifiedAtMs });
+  metadataCache.set(file.id, { ...metadata, size: file.size, modifiedAtMs: file.modifiedAtMs });
   return metadata;
 }
 
@@ -307,8 +295,8 @@ async function serializeMedia(file: MediaFile): Promise<MediaItem> {
     modifiedAt: new Date(file.modifiedAtMs).toISOString(),
     size: file.size,
     durationSeconds: metadata.durationSeconds,
-    contentUrl: `/lgallery/api/media/${file.id}/content?v=${version}`,
-    thumbnailUrl: `/lgallery/api/media/${file.id}/thumbnail?v=${version}`,
+    contentUrl: `/api/media/${file.id}/content?v=${version}`,
+    thumbnailUrl: `/api/media/${file.id}/thumbnail?v=${version}`,
   };
 }
 
@@ -355,9 +343,7 @@ export async function listAlbums(): Promise<AlbumSummary[]> {
 
 export async function getMediaFileById(mediaId: string) {
   cleanupSnapshots();
-  const root = await getLibraryRoot();
   for (const snapshot of snapshots.values()) {
-    if (snapshot.root !== root) continue;
     const match = snapshot.files.find((file) => file.id === mediaId);
     if (match) return match;
   }
@@ -365,9 +351,9 @@ export async function getMediaFileById(mediaId: string) {
   return snapshot.files.find((file) => file.id === mediaId) ?? null;
 }
 
-export async function getThumbnailCachePath(file: MediaFile) {
+export function getThumbnailCachePath(file: MediaFile) {
   const version = `${file.id}-${file.size}-${Math.floor(file.modifiedAtMs)}`;
-  return path.join(await getMediaCacheRoot(), `${version}.${file.kind === "image" ? "webp" : "jpg"}`);
+  return path.join(getMediaCacheRoot(), `${version}.${file.kind === "image" ? "webp" : "jpg"}`);
 }
 
 export function clearLibraryCaches() {

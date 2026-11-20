@@ -47,7 +47,7 @@ export function validateFolderName(value: string | null | undefined) {
 }
 
 async function getDestinationDirectory(folderName: string | null) {
-  const root = await getLibraryRoot();
+  const root = getLibraryRoot();
   let rootStats;
   try {
     rootStats = await stat(root);
