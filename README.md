@@ -13,6 +13,7 @@ LGallery is a private photo and video gallery for your home network. It scans on
 - Light and dark gallery themes.
 - Drag-and-drop uploads with per-file progress, duplicate-safe names, and a root or new-subfolder destination.
 - Album browsing based on direct subfolders, with the normal gallery and viewer inside each album.
+- A user and password to open it; the session lasts 30 days.
 - No database, edits, deletes, or exposed filesystem paths.
 
 ## Run with Docker Compose
@@ -26,7 +27,12 @@ cp .env.example .env
 ```env
 APP_PORT=3000
 MEDIA_LIBRARY_HOST_PATH=/absolute/path/to/your/photos
+LGALLERY_USERNAME=admin
+LGALLERY_PASSWORD=*PasswordSafe
 ```
+
+`LGALLERY_USERNAME` (default `admin`) and `LGALLERY_PASSWORD` are what the sign-in page asks for. Change the
+password from the example: changing either one signs everyone out.
 
 Start LGallery:
 
@@ -38,7 +44,8 @@ Open `http://localhost:3000` on the host, or `http://<host-lan-ip>:3000` from an
 
 Open `/upload`, drag or choose one or more files, then select the library root, an existing album, or enter a new subfolder name. Existing files are never overwritten: LGallery adds a numeric suffix when a name is already present. Any file type can be stored, while only supported photo and video formats appear in the gallery.
 
-> LGallery has no authentication. Keep port 3000 on a trusted LAN and do not expose it directly to the internet.
+> LGallery asks for a password, but over plain HTTP it travels unencrypted. Keep port 3000 on a trusted LAN, or put it
+> behind HTTPS, and do not expose it directly to the internet.
 
 ## Update a deployment
 
@@ -53,6 +60,7 @@ Install dependencies and run Next.js with server-only environment variables:
 pnpm install
 MEDIA_LIBRARY_PATH=/absolute/path/to/your/photos \
 MEDIA_CACHE_PATH=/absolute/path/to/a/writable/cache \
+LGALLERY_PASSWORD=choose-one \
 pnpm dev
 ```
 

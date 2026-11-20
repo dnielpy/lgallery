@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { LogoutButton } from "@/src/modules/layout/components/logout-button";
 import { ThemeToggle } from "@/src/modules/layout/components/theme-toggle";
 
 export function AppBar() {
@@ -9,8 +10,9 @@ export function AppBar() {
         <Image src="/lgallery-logo.svg" alt="" width={36} height={36} priority className="size-8" />
         <span className="text-xl font-medium tracking-[-0.025em] text-foreground">LGallery</span>
       </Link>
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
+        <LogoutButton />
       </div>
     </header>
   );

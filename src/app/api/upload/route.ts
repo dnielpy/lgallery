@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { clearLibraryCaches } from "@/src/modules/library/server/library";
 import { saveUpload, UploadError } from "@/src/modules/upload/server/save-upload";
+import { isValidSessionToken, sessionFromCookieHeader } from "@/src/modules/auth/server/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,11 @@ function decodeHeader(value: string, label: string) {
 }
 
 export async function POST(request: Request) {
+  // Not behind the proxy (see src/proxy.ts), so it checks the session itself.
+  if (!isValidSessionToken(sessionFromCookieHeader(request.headers.get("cookie")))) {
+    return NextResponse.json({ error: "Sign in to LGallery first." }, { status: 401 });
+  }
+
   const encodedFileName = request.headers.get("x-file-name");
   if (!encodedFileName) {
     return NextResponse.json({ error: "File name is required." }, { status: 400 });

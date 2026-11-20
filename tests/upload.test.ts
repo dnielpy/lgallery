@@ -5,17 +5,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { POST } from "@/src/app/api/upload/route";
 import { clearLibraryCaches } from "@/src/modules/library/server/library";
 import { saveUpload, validateFolderName } from "@/src/modules/upload/server/save-upload";
+import { createSessionToken, SESSION_COOKIE } from "@/src/modules/auth/server/session";
 
 let temporaryRoot: string;
 
 beforeEach(async () => {
   temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "lgallery-upload-test-"));
   process.env.MEDIA_LIBRARY_PATH = temporaryRoot;
+  process.env.LGALLERY_PASSWORD = "test-password";
 });
 
 afterEach(async () => {
   clearLibraryCaches();
   delete process.env.MEDIA_LIBRARY_PATH;
+  delete process.env.LGALLERY_PASSWORD;
   await rm(temporaryRoot, { recursive: true, force: true });
 });
 
@@ -55,11 +58,23 @@ describe("uploads", () => {
         host: "192.168.20.188:3000",
         origin: "http://192.168.20.188:3000",
         "x-file-name": "from-lan.txt",
+        cookie: `theme=dark; ${SESSION_COOKIE}=${createSessionToken()}`,
       },
       body: "LAN upload",
     });
     const response = await POST(request);
     expect(response.status).toBe(201);
     await expect(readFile(path.join(temporaryRoot, "from-lan.txt"), "utf8")).resolves.toBe("LAN upload");
+  });
+
+  it("refuses uploads without a session", async () => {
+    const request = new Request("http://0.0.0.0:3000/api/upload", {
+      method: "POST",
+      headers: { "x-file-name": "anonymous.txt", cookie: `${SESSION_COOKIE}=1.forged` },
+      body: "nope",
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(401);
+    await expect(stat(path.join(temporaryRoot, "anonymous.txt"))).rejects.toThrow();
   });
 });
