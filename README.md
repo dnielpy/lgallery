@@ -24,6 +24,7 @@ cp .env.example .env
 ```
 
 ```env
+APP_PORT=3000
 MEDIA_LIBRARY_HOST_PATH=/absolute/path/to/your/photos
 ```
 
@@ -33,11 +34,16 @@ Start LGallery:
 docker compose up --build -d
 ```
 
-Open `http://localhost:3000` on the host, or `http://<host-lan-ip>:3000` from another device on the same network. The source library is mounted read-write so `/upload` can store files. Generated previews live in the `lgallery-cache` Docker volume.
+Open `http://localhost:3000` on the host, or `http://<host-lan-ip>:3000` from another device on the same network (change `APP_PORT` if 3000 is taken). The source library is mounted read-write so `/upload` can store files. Generated previews live in the `lgallery-cache` Docker volume.
 
 Open `/upload`, drag or choose one or more files, then select the library root, an existing album, or enter a new subfolder name. Existing files are never overwritten: LGallery adds a numeric suffix when a name is already present. Any file type can be stored, while only supported photo and video formats appear in the gallery.
 
 > LGallery has no authentication. Keep port 3000 on a trusted LAN and do not expose it directly to the internet.
+
+## Update a deployment
+
+`./scripts/update.sh` pulls the latest code and builds the image while the old container keeps running, then
+restarts it. The Home Server Dashboard runs this script when you update LGallery from it.
 
 ## Local development
 
