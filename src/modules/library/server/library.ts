@@ -1,13 +1,28 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import type { Album, AlbumSummary, MediaItem, MediaKind, MediaPage } from "@/src/modules/library/types";
+import {
+  DEFAULT_MEDIA_QUERY,
+  type Album,
+  type AlbumSummary,
+  type MediaItem,
+  type MediaKind,
+  type MediaPage,
+  type MediaQuery,
+} from "@/src/modules/library/types";
 
-const PAGE_SIZE = 60;
+const PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 60;
 const SNAPSHOT_TTL_MS = 10 * 60 * 1000;
 const METADATA_CONCURRENCY = 4;
+// Probing a video on the USB disk takes about a second, so what was read is kept across restarts
+const METADATA_FILE = "metadata.json";
+const METADATA_SAVE_DELAY_MS = 2000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MB = 1024 * 1024;
+const MINUTE = 60;
 
 const MEDIA_TYPES = new Map<string, { kind: MediaKind; mimeType: string }>([
   [".jpg", { kind: "image", mimeType: "image/jpeg" }],
@@ -40,7 +55,8 @@ type LibrarySnapshot = {
   id: string;
   createdAt: number;
   files: MediaFile[];
-  albumId: string | null;
+  // The album and query it lists; a cursor only continues the same listing
+  key: string;
 };
 
 type CursorPayload = {
@@ -52,12 +68,16 @@ type ListMediaOptions = {
   cursor?: string;
   limit?: number;
   albumId?: string;
+  query?: MediaQuery;
 };
 
 type AlbumDirectory = Album & { absolutePath: string };
 
 const snapshots = new Map<string, LibrarySnapshot>();
 const metadataCache = new Map<string, MediaMetadata & { size: number; modifiedAtMs: number }>();
+let metadataLoaded: Promise<void> | null = null;
+let metadataSaveTimer: NodeJS.Timeout | null = null;
+let warming: Promise<void> | null = null;
 
 export function getLibraryRoot() {
   const configuredPath = process.env.MEDIA_LIBRARY_PATH?.trim();
@@ -201,16 +221,122 @@ export async function scanLibrary(albumId?: string) {
   });
 }
 
-async function createSnapshot(albumId?: string) {
+function snapshotKey(albumId: string | undefined, query: MediaQuery) {
+  return JSON.stringify([albumId ?? null, query.sort, query.date, query.size, query.duration]);
+}
+
+function matchesDate(file: MediaFile, date: MediaQuery["date"], now: number) {
+  const age = now - file.modifiedAtMs;
+  if (date === "week") return age <= 7 * DAY_MS;
+  if (date === "month") return age <= 30 * DAY_MS;
+  if (date === "year") return age <= 365 * DAY_MS;
+  if (date === "older") return age > 365 * DAY_MS;
+  return true;
+}
+
+function matchesSize(file: MediaFile, size: MediaQuery["size"]) {
+  if (size === "small") return file.size < 500 * MB;
+  if (size === "medium") return file.size >= 500 * MB && file.size < 2048 * MB;
+  if (size === "large") return file.size >= 2048 * MB;
+  return true;
+}
+
+function matchesDuration(seconds: number | null, duration: MediaQuery["duration"]) {
+  if (duration === "any") return true;
+  if (seconds === null) return false;
+  if (duration === "short") return seconds < 10 * MINUTE;
+  if (duration === "medium") return seconds >= 10 * MINUTE && seconds < 30 * MINUTE;
+  return seconds >= 30 * MINUTE;
+}
+
+/** The files of the library, or of an album, that match a query, in its order. */
+export async function queryLibrary(albumId: string | undefined, query: MediaQuery = DEFAULT_MEDIA_QUERY) {
+  const now = Date.now();
+  // Newest first, from the scan
+  let files = (await scanLibrary(albumId)).filter(
+    (file) => matchesDate(file, query.date, now) && matchesSize(file, query.size),
+  );
+  if (query.sort === "oldest") files.reverse();
+  if (query.sort === "largest") files.sort((first, second) => second.size - first.size);
+  if (query.sort === "smallest") files.sort((first, second) => first.size - second.size);
+
+  const byDuration = query.sort === "longest" || query.sort === "shortest";
+  if (query.duration === "any" && !byDuration) {
+    // Reads the rest in the background, so a filter or sort by duration later does not wait for all of them
+    warmMetadata(files);
+    return files;
+  }
+  const durations = new Map<string, number | null>();
+  await mapWithConcurrency(files, METADATA_CONCURRENCY, async (file) => {
+    durations.set(file.id, (await readMetadata(file)).durationSeconds);
+  });
+  files = files.filter((file) => matchesDuration(durations.get(file.id) ?? null, query.duration));
+  if (byDuration) {
+    const direction = query.sort === "longest" ? -1 : 1;
+    // Without a duration (photos, broken videos) last; sort is stable, so ties stay newest first
+    files.sort((first, second) => {
+      const a = durations.get(first.id) ?? null;
+      const b = durations.get(second.id) ?? null;
+      if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
+      return (a - b) * direction;
+    });
+  }
+  return files;
+}
+
+async function createSnapshot(albumId?: string, query: MediaQuery = DEFAULT_MEDIA_QUERY) {
   cleanupSnapshots();
   const snapshot: LibrarySnapshot = {
     id: randomUUID(),
     createdAt: Date.now(),
-    files: await scanLibrary(albumId),
-    albumId: albumId ?? null,
+    files: await queryLibrary(albumId, query),
+    key: snapshotKey(albumId, query),
   };
   snapshots.set(snapshot.id, snapshot);
   return snapshot;
+}
+
+function metadataFile() {
+  return path.join(getMediaCacheRoot(), METADATA_FILE);
+}
+
+function loadMetadata() {
+  metadataLoaded ??= (async () => {
+    try {
+      const saved = JSON.parse(await readFile(metadataFile(), "utf8")) as Record<string, MediaMetadata & { size: number; modifiedAtMs: number }>;
+      for (const [id, metadata] of Object.entries(saved)) {
+        if (!metadataCache.has(id)) metadataCache.set(id, metadata);
+      }
+    } catch {
+      // Nothing saved yet, or a file that cannot be read: it is probed again
+    }
+  })();
+  return metadataLoaded;
+}
+
+function saveMetadataSoon() {
+  if (metadataSaveTimer) return;
+  metadataSaveTimer = setTimeout(async () => {
+    metadataSaveTimer = null;
+    const target = metadataFile();
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    try {
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(temporary, JSON.stringify(Object.fromEntries(metadataCache)));
+      await rename(temporary, target);
+    } catch {
+      // The cache is only a speed-up
+    }
+  }, METADATA_SAVE_DELAY_MS);
+  metadataSaveTimer.unref?.();
+}
+
+function warmMetadata(files: MediaFile[]) {
+  if (warming) return;
+  warming = (async () => {
+    // One at a time, so it does not slow down the pages and thumbnails being asked for
+    for (const file of files) await readMetadata(file).catch(() => undefined);
+  })().finally(() => { warming = null; });
 }
 
 function runCommand(command: string, args: string[]) {
@@ -224,6 +350,7 @@ function runCommand(command: string, args: string[]) {
 }
 
 async function readMetadata(file: MediaFile): Promise<MediaMetadata> {
+  await loadMetadata();
   const cached = metadataCache.get(file.id);
   if (cached && cached.size === file.size && cached.modifiedAtMs === file.modifiedAtMs) return cached;
 
@@ -266,6 +393,7 @@ async function readMetadata(file: MediaFile): Promise<MediaMetadata> {
   }
 
   metadataCache.set(file.id, { ...metadata, size: file.size, modifiedAtMs: file.modifiedAtMs });
+  saveMetadataSoon();
   return metadata;
 }
 
@@ -300,17 +428,18 @@ async function serializeMedia(file: MediaFile): Promise<MediaItem> {
   };
 }
 
-export async function listMedia({ cursor, limit = PAGE_SIZE, albumId }: ListMediaOptions = {}): Promise<MediaPage> {
+export async function listMedia({ cursor, limit = PAGE_SIZE, albumId, query = DEFAULT_MEDIA_QUERY }: ListMediaOptions = {}): Promise<MediaPage> {
   cleanupSnapshots();
-  const safeLimit = Math.min(Math.max(Math.floor(limit) || PAGE_SIZE, 1), PAGE_SIZE);
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || PAGE_SIZE, 1), MAX_PAGE_SIZE);
   const decoded = cursor ? decodeCursor(cursor) : null;
   let snapshot = decoded ? snapshots.get(decoded.snapshotId) : undefined;
   let offset = decoded?.offset ?? 0;
-  if (!snapshot || (albumId !== undefined && snapshot.albumId !== albumId)) {
+  const key = snapshotKey(albumId, query);
+  if (!snapshot || snapshot.key !== key) {
     // A cursor whose snapshot expired, or was cleared by an upload, keeps its place in a fresh one, so the next page
-    // does not start the library over and show what is already on screen again. Another album starts at the top.
+    // does not start the library over and show what is already on screen again. Another listing starts at the top.
     if (snapshot) offset = 0;
-    snapshot = await createSnapshot(albumId);
+    snapshot = await createSnapshot(albumId, query);
   }
 
   const files = snapshot.files.slice(offset, offset + safeLimit);
@@ -361,4 +490,7 @@ export function getThumbnailCachePath(file: MediaFile) {
 export function clearLibraryCaches() {
   snapshots.clear();
   metadataCache.clear();
+  metadataLoaded = null;
+  if (metadataSaveTimer) clearTimeout(metadataSaveTimer);
+  metadataSaveTimer = null;
 }

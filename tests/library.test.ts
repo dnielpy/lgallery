@@ -2,7 +2,8 @@ import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { clearLibraryCaches, createAlbumId, createMediaId, getAlbumById, listAlbumDestinations, listAlbums, listMedia, scanLibrary } from "@/src/modules/library/server/library";
+import { clearLibraryCaches, createAlbumId, createMediaId, getAlbumById, listAlbumDestinations, listAlbums, listMedia, queryLibrary, scanLibrary } from "@/src/modules/library/server/library";
+import { DEFAULT_MEDIA_QUERY, parseMediaQuery } from "@/src/modules/library/types";
 
 let temporaryRoot: string | undefined;
 
@@ -74,6 +75,46 @@ describe("media library", () => {
     const second = await listMedia({ cursor: first.nextCursor!, limit: 2 });
     expect(second.items.map((item) => item.fileName)).toEqual(["c.jpg"]);
     expect(second.nextCursor).toBeNull();
+  });
+
+  it("filters by date and size, and sorts by size", async () => {
+    const root = await makeLibrary();
+    const now = Date.now();
+    for (const [name, bytes, daysAgo] of [["new.jpg", 3, 1], ["big.jpg", 9, 20], ["old.jpg", 5, 400]] as const) {
+      await writeFile(path.join(root, name), "x".repeat(bytes));
+      const date = new Date(now - daysAgo * 24 * 60 * 60 * 1000);
+      await utimes(path.join(root, name), date, date);
+    }
+    const names = async (query: Partial<typeof DEFAULT_MEDIA_QUERY>) =>
+      (await queryLibrary(undefined, { ...DEFAULT_MEDIA_QUERY, ...query })).map((file) => file.fileName);
+
+    expect(await names({})).toEqual(["new.jpg", "big.jpg", "old.jpg"]);
+    expect(await names({ sort: "oldest" })).toEqual(["old.jpg", "big.jpg", "new.jpg"]);
+    expect(await names({ sort: "largest" })).toEqual(["big.jpg", "old.jpg", "new.jpg"]);
+    expect(await names({ date: "week" })).toEqual(["new.jpg"]);
+    expect(await names({ date: "month", sort: "smallest" })).toEqual(["new.jpg", "big.jpg"]);
+    expect(await names({ date: "older" })).toEqual(["old.jpg"]);
+    expect(await names({ size: "large" })).toEqual([]);
+    expect(await names({ size: "small" })).toHaveLength(3);
+  });
+
+  it("starts a different query at the top instead of continuing another one's cursor", async () => {
+    const root = await makeLibrary();
+    for (const [name, date] of [["a.jpg", "2025-03-01"], ["b.jpg", "2025-02-01"]]) {
+      await writeFile(path.join(root, name), name);
+      await utimes(path.join(root, name), new Date(date), new Date(date));
+    }
+    const first = await listMedia({ limit: 1 });
+    const other = await listMedia({ cursor: first.nextCursor!, limit: 1, query: { ...DEFAULT_MEDIA_QUERY, sort: "oldest" } });
+    expect(other.items.map((item) => item.fileName)).toEqual(["b.jpg"]);
+    expect(other.nextCursor).toBeTruthy();
+  });
+
+  it("reads a query from search params, ignoring what it does not know", () => {
+    expect(parseMediaQuery(new URLSearchParams("sort=largest&size=huge&duration=long"))).toEqual({
+      ...DEFAULT_MEDIA_QUERY, sort: "largest", duration: "long",
+    });
+    expect(parseMediaQuery({ date: "week", sort: ["oldest"] })).toEqual({ ...DEFAULT_MEDIA_QUERY, date: "week" });
   });
 
   it("creates stable opaque identifiers", () => {
