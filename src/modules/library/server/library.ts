@@ -307,8 +307,10 @@ export async function listMedia({ cursor, limit = PAGE_SIZE, albumId }: ListMedi
   let snapshot = decoded ? snapshots.get(decoded.snapshotId) : undefined;
   let offset = decoded?.offset ?? 0;
   if (!snapshot || (albumId !== undefined && snapshot.albumId !== albumId)) {
+    // A cursor whose snapshot expired, or was cleared by an upload, keeps its place in a fresh one, so the next page
+    // does not start the library over and show what is already on screen again. Another album starts at the top.
+    if (snapshot) offset = 0;
     snapshot = await createSnapshot(albumId);
-    offset = 0;
   }
 
   const files = snapshot.files.slice(offset, offset + safeLimit);

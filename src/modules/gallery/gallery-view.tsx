@@ -53,7 +53,11 @@ export function GalleryView({ initialItems, initialCursor, error, albumId, title
         throw new Error(body?.error ?? "Unable to load more photos.");
       }
       const page = await response.json() as MediaPage;
-      setItems((current) => [...current, ...page.items]);
+      // A page can overlap what is shown when the library changed in between
+      setItems((current) => {
+        const shown = new Set(current.map((item) => item.id));
+        return [...current, ...page.items.filter((item) => !shown.has(item.id))];
+      });
       setNextCursor(page.nextCursor);
     } catch (caught) {
       setLoadError(caught instanceof Error ? caught.message : "Unable to load more photos.");

@@ -60,6 +60,22 @@ describe("media library", () => {
     expect(JSON.stringify(first.items[0])).not.toContain(root);
   });
 
+  it("keeps its place when the snapshot behind a cursor is gone", async () => {
+    const root = await makeLibrary();
+    for (const [name, date] of [["a.jpg", "2025-03-01"], ["b.jpg", "2025-02-01"], ["c.jpg", "2025-01-01"]]) {
+      await writeFile(path.join(root, name), name);
+      await utimes(path.join(root, name), new Date(date), new Date(date));
+    }
+
+    const first = await listMedia({ limit: 2 });
+    expect(first.items.map((item) => item.fileName)).toEqual(["a.jpg", "b.jpg"]);
+    // An expired snapshot, or one an upload cleared, must not start the library over
+    clearLibraryCaches();
+    const second = await listMedia({ cursor: first.nextCursor!, limit: 2 });
+    expect(second.items.map((item) => item.fileName)).toEqual(["c.jpg"]);
+    expect(second.nextCursor).toBeNull();
+  });
+
   it("creates stable opaque identifiers", () => {
     expect(createMediaId("holiday/photo.jpg")).toBe(createMediaId("holiday/photo.jpg"));
     expect(createMediaId("holiday/photo.jpg")).not.toBe(createMediaId("other/photo.jpg"));
